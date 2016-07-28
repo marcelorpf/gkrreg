@@ -78,7 +78,7 @@ kernel.reg2 = function(x, y, tol = 1e-10, maxit = 100)
   (result = list(coef = as.vector(betahat), fitted = as.vector(yhat), criterion = S, weigth = K))
 }
 
-kernel.reg6 = function(x, y, tol = 1e-10, maxit = 100)
+kernel.reg3 = function(x, y, tol = 1e-10, maxit = 100)
 {
   x = as.matrix(x)
   n = nrow(x)
