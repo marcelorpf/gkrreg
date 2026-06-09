@@ -1,0 +1,7 @@
+^doc$
+^Meta$
+^cran-comments\.md$
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.positai$
+^\.claude$

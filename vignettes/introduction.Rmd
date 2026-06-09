@@ -1,0 +1,347 @@
+---
+title: "Introduction to gkrreg: Gaussian Kernel Robust Regression"
+author: "Eufrásio de Andrade Lima Neto, Marcelo Rodrigo Portela Ferreira"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to gkrreg: Gaussian Kernel Robust Regression}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+bibliography: references.bib
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse   = TRUE,
+  comment    = "#>",
+  fig.width  = 6,
+  fig.height = 4,
+  fig.align  = "center"
+)
+set.seed(1)
+```
+
+## Overview
+
+The **gkrreg** package implements the *Gaussian Kernel Robust Regression*
+(GKRReg, or GKRR) method proposed by @decarvalho2017.  The method fits a
+linear regression model by iteratively re-weighting observations using the
+Gaussian kernel, so that outliers and leverage points are automatically
+down-weighted.  Convergence is theoretically guaranteed (Propositions 4.1
+and 4.2 of the paper).
+
+The package provides:
+
+- `gkrr()` — model fitting with four width hyper-parameter estimators
+  (`"s1"`, `"s2"`, `"s3"`, `"s4"`) plus automatic data-driven selection
+  (`"auto"`);
+- `gkrr_boot()` — bootstrap inference (standard errors, confidence intervals
+  and p-values);
+- `summary.gkrr()` — a coefficient table modelled after `summary.lm()`,
+  with sandwich inference by default and bootstrap inference when available;
+- `plot.gkrr()` — six diagnostic panels emphasising kernel weights;
+- Six real datasets from the robust regression literature.
+
+---
+
+## The GKRR method
+
+### Model and objective function
+
+GKRReg minimises
+
+$$S(\boldsymbol{\beta}) = 2\sum_{i=1}^n \bigl[1 - G(y_i,\, \hat{\mu}_i)\bigr],
+\qquad G(a,b) = \exp\!\bigl(-{(a-b)^2}/{\gamma^2}\bigr),$$
+
+where $\hat{\mu}_i = \mathbf{x}_i^\top\boldsymbol{\beta}$ and $\gamma^2 > 0$
+is the kernel width hyper-parameter.  An observation with a large residual
+contributes close to 2 to $S$; a perfectly fitted observation contributes 0.
+
+### Estimation algorithm
+
+Differentiating $S$ yields an IRWLS problem with kernel weights
+$k_{ii}^{(t)} = G(y_i, \hat{\mu}_i^{(t-1)}) \in (0,1]$.  The algorithm
+starts from OLS and alternates between WLS and weight updates until
+convergence (Propositions 4.1–4.2 of @decarvalho2017).
+
+### Width hyper-parameter $\gamma^2$
+
+Five options are available via the `sigma_method` argument:
+
+| Method | Description | Recommended scenario |
+|--------|-------------|----------------------|
+| `"s1"` | Mean of the 0.1 and 0.9 quantiles of OLS squared residuals on a sub-sample (Caputo estimator) | Clean data |
+| `"s2"` | Pairwise median of $(y_i - \hat{\mu}_j^{\text{OLS}})^2$, $i \neq j$ | Y-space outliers $\leq 10\%$; X-space outliers $\leq 15\%$ |
+| `"s3"` | Residual variance $\sum(y_i - \hat{\mu}_i)^2 / (n - p - 1)$ | Y-space outliers $\geq 15\%$; leverage points |
+| `"s4"` | AICc-selected bandwidth $h^2$ via `sm::h.select()` | Large samples ($n \geq 200$) |
+| `"auto"` | Selects among S1–S4 by out-of-bag bootstrap MSE | When the outlier scenario is unknown |
+
+When `"auto"` is used, a message is emitted showing which method was
+selected and the comparative OOB MSEs.  The selection uses $B = 99$
+replicates by default, configurable via `auto_args = list(B = ...)`.
+
+---
+
+## Basic usage
+
+```{r basic}
+library(gkrreg)
+
+data(belgium_calls)
+
+fit <- gkrr(calls ~ year, data = belgium_calls, sigma_method = "s3")
+print(fit)
+```
+
+`summary()` uses the **sandwich variance estimator** by default, producing
+standard errors, confidence intervals and Wald z-test p-values with no
+additional computation:
+
+```{r summary-sandwich}
+summary(fit)
+```
+
+The sandwich covariance matrix is accessible via `vcov()`:
+
+```{r vcov}
+round(vcov(fit), 6)
+```
+
+---
+
+## Statistical inference
+
+### Sandwich variance estimator (default)
+
+The original paper does not provide a sampling distribution for
+$\hat{\boldsymbol{\beta}}$.  The WLS covariance matrix
+$(X^\top \hat{K} X)^{-1}$ from the final IRWLS step treats $\hat{K}$ as
+fixed and therefore underestimates the true variance.
+
+**gkrreg** implements an analytic *sandwich variance estimator* based on the
+theory of generalised $M$-estimators.  At convergence the GKRReg estimating
+equations are:
+
+$$\sum_{i=1}^n k_{ii}(\boldsymbol{\beta})\,\mathbf{x}_i
+  (y_i - \mathbf{x}_i^\top\boldsymbol{\beta}) = \mathbf{0},$$
+
+and the asymptotic sandwich covariance is
+$n^{-1}\hat{A}^{-1}\hat{B}\hat{A}^{-1}$, where
+
+$$\hat{A} = \frac{1}{n}\,\mathbf{X}^\top
+  \operatorname{diag}\!\left[k_{ii}\!\left(1 - \frac{2\hat{e}_i^2}{\hat{\gamma}^2}\right)\right]
+  \mathbf{X}, \qquad
+\hat{B} = \frac{1}{n}\,\mathbf{X}^\top
+  \operatorname{diag}\!\left(k_{ii}^2\,\hat{e}_i^2\right)\mathbf{X}.$$
+
+This corresponds to the HC0 class of heteroskedasticity-robust covariance
+estimators [@white1982].  The correction term
+$(1 - 2\hat{e}_i^2/\hat{\gamma}^2)$ in $\hat{A}$ arises directly from
+differentiating the Gaussian kernel with respect to $\boldsymbol{\beta}$.
+
+**When is the sandwich reliable?**  The sandwich is consistent and efficient
+asymptotically, but treats $\hat{\gamma}^2$ as fixed.  For small samples
+($n < 50$) or heavy contamination, bootstrap inference is recommended.
+`summary()` emits a note when these conditions are detected automatically.
+
+### Bootstrap inference
+
+`gkrr_boot()` runs a *pairs bootstrap*, re-fitting the complete GKRReg
+algorithm — including re-estimating $\gamma^2$ — on each replicate.  This
+captures all sources of variability and is more reliable than the sandwich
+for small samples or heavy contamination.
+
+Three CI types are available: `"percentile"`, `"normal"`, and `"bca"`
+(bias-corrected and accelerated, @efron1987; the default and recommended).
+Bootstrap p-values use the centred-t approach:
+
+$$p_j = \frac{2}{B}\,\#\!\left\{|\hat\beta_j^* - \hat\beta_j| \geq |\hat\beta_j|\right\}.$$
+
+**Option A — `boot = TRUE` inside `gkrr()`**
+
+```{r boot-true, eval = FALSE}
+fit_b <- gkrr(calls ~ year, data = belgium_calls,
+              sigma_method = "s3",
+              boot      = TRUE,
+              boot_args = list(B = 999, type = "bca", seed = 1))
+summary(fit_b)
+```
+
+**Option B — separate `gkrr_boot()` call**
+
+```{r boot-separate, eval = FALSE}
+boot <- gkrr_boot(fit, B = 999, type = "bca", seed = 1)
+summary(fit, boot = boot)
+plot(boot, which = 1)   # histogram + shaded CI per coefficient
+plot(boot, which = 2)   # bootstrap scatter-plot matrix
+```
+
+### Choosing between sandwich and bootstrap
+
+| Scenario | Recommended |
+|----------|-------------|
+| $n \geq 50$, mild contamination | Sandwich (fast, deterministic) |
+| $n < 50$ or heavy contamination | Bootstrap |
+| Both available and SEs diverge by > 25% | Bootstrap |
+
+When both are available, `summary()` automatically warns if the relative
+discrepancy in standard errors exceeds 25% for any coefficient.
+
+---
+
+## Diagnostic plots
+
+`plot.gkrr()` provides six panels.  **Point size is inversely proportional
+to $k_{ii}$**: outliers appear large and red; well-fitted observations appear
+small and blue.
+
+```{r plots, fig.width = 7, fig.height = 3}
+oldpar <- par(no.readonly = TRUE)
+on.exit(par(oldpar))
+par(mfrow = c(1, 3))
+plot(fit, which = 1, ask = FALSE)   # residuals vs. fitted
+plot(fit, which = 3, ask = FALSE)   # weight vs. residual + kernel curve
+plot(fit, which = 4, ask = FALSE)   # weight vs. index
+par(oldpar)
+```
+
+Panel 3 overlays the theoretical curve $G(e) = \exp(-e^2/\hat{\gamma}^2)$,
+making the down-weighting mechanism directly visible.  Observations 15–20 in
+`belgium_calls` (a recording error) receive near-zero weights and are
+effectively excluded from the fit.
+
+| `which` | Description |
+|---------|-------------|
+| 1 | Residuals vs. fitted values |
+| 2 | Observed vs. fitted ($y$ vs. $\hat{\mu}$) |
+| 3 | Kernel weight vs. residual with theoretical curve |
+| 4 | Kernel weight vs. observation index |
+| 5 | Normal QQ-plot of residuals, coloured by weight |
+| 6 | Convergence of $S(\boldsymbol{\beta})$ |
+
+---
+
+## Comparison with other methods
+
+```{r comparison, message = FALSE, fig.width = 6, fig.height = 4}
+data(kootenay)
+
+fit_ols  <- lm(newgate ~ libby, data = kootenay)
+fit_gkrr <- gkrr(newgate ~ libby, data = kootenay, sigma_method = "s1")
+
+if (requireNamespace("MASS", quietly = TRUE)) {
+  fit_m  <- MASS::rlm(newgate ~ libby, data = kootenay, method = "M")
+  fit_mm <- MASS::rlm(newgate ~ libby, data = kootenay, method = "MM")
+} else { fit_m <- fit_mm <- NULL }
+
+tab <- rbind(OLS  = coef(fit_ols),
+             GKRR = coef(fit_gkrr))
+if (!is.null(fit_m))
+  tab <- rbind(tab, M = coef(fit_m), MM = coef(fit_mm))
+print(round(tab, 4))
+
+plot(kootenay$libby, kootenay$newgate,
+     xlab = "Libby flow", ylab = "Newgate flow",
+     main = "Kootenay River -- X-space outlier (1934)",
+     pch = 19, col = "grey60")
+points(kootenay["1934","libby"], kootenay["1934","newgate"],
+       col = "red", pch = 17, cex = 1.6)
+abline(fit_ols,  col = "black",     lwd = 2, lty = 2)
+abline(fit_gkrr, col = "firebrick", lwd = 2)
+if (!is.null(fit_m)) {
+  abline(fit_m,  col = "darkorange", lwd = 2, lty = 3)
+  abline(fit_mm, col = "purple",     lwd = 2, lty = 4)
+  legend("topleft", c("OLS","GKRR","M","MM","1934"),
+         col = c("black","firebrick","darkorange","purple","red"),
+         lty = c(2,1,3,4,NA), pch = c(NA,NA,NA,NA,17), lwd = 2, bty = "n")
+} else {
+  legend("topleft", c("OLS","GKRR","1934"),
+         col = c("black","firebrick","red"),
+         lty = c(2,1,NA), pch = c(NA,NA,17), lwd = 2, bty = "n")
+}
+```
+
+---
+
+## Real-data applications
+
+### Belgium international calls — Y-space outliers
+
+```{r belgium, fig.width = 6, fig.height = 4}
+fit_ols  <- lm(calls ~ year, data = belgium_calls)
+fit_gkrr <- gkrr(calls ~ year, data = belgium_calls, sigma_method = "s3")
+
+plot(belgium_calls$year + 1900, belgium_calls$calls,
+     xlab = "Year", ylab = "Calls (tens of millions)",
+     main = "Belgium International Calls",
+     pch = 19, col = "grey60")
+points(belgium_calls$year[15:20] + 1900, belgium_calls$calls[15:20],
+       col = "red", pch = 17, cex = 1.4)
+abline(fit_ols,  col = "black",     lwd = 2, lty = 2)
+abline(fit_gkrr, col = "firebrick", lwd = 2)
+legend("topleft", c("OLS","GKRR (S3)","Outliers (1964-69)"),
+       col = c("black","firebrick","red"),
+       lty = c(2,1,NA), pch = c(NA,NA,17), lwd = 2, bty = "n")
+```
+
+```{r belgium-diag, fig.width = 7, fig.height = 3}
+oldpar <- par(no.readonly = TRUE)
+on.exit(par(oldpar))
+par(mfrow = c(1, 3))
+plot(fit_gkrr, which = 1, ask = FALSE)
+plot(fit_gkrr, which = 3, ask = FALSE)
+plot(fit_gkrr, which = 4, ask = FALSE)
+par(oldpar)
+```
+
+### Delivery time — leverage points in multiple regression
+
+```{r delivery}
+data(delivery)
+fit_ols  <- lm(delivery_time ~ n_products + distance, data = delivery)
+fit_gkrr <- gkrr(delivery_time ~ n_products + distance, data = delivery,
+                 sigma_method = "s3")
+round(rbind(OLS  = coef(fit_ols),
+            GKRR = coef(fit_gkrr)), 4)
+```
+
+```{r delivery-diag, fig.width = 7, fig.height = 3}
+oldpar <- par(no.readonly = TRUE)
+on.exit(par(oldpar))
+par(mfrow = c(1, 3))
+plot(fit_gkrr, which = 2, ask = FALSE)
+plot(fit_gkrr, which = 4, ask = FALSE)
+plot(fit_gkrr, which = 5, ask = FALSE)
+par(oldpar)
+```
+
+### Mammals — leverage on the log scale
+
+```{r mammals, fig.width = 6, fig.height = 4}
+data(mammals)
+fit_ols  <- lm(log_brain ~ log_body, data = mammals)
+fit_gkrr <- gkrr(log_brain ~ log_body, data = mammals, sigma_method = "s3")
+
+plot(mammals$log_body, mammals$log_brain,
+     xlab = "log(body mass, kg)", ylab = "log(brain mass, g)",
+     main = "Brain vs. Body Mass (62 Mammal Species)",
+     pch = 19, col = "grey60", cex = 0.8)
+elephants <- mammals$species %in% c("African elephant","Asian elephant")
+points(mammals$log_body[elephants], mammals$log_brain[elephants],
+       col = "red", pch = 17, cex = 1.5)
+abline(fit_ols,  col = "black",     lwd = 2, lty = 2)
+abline(fit_gkrr, col = "firebrick", lwd = 2)
+legend("topleft", c("OLS","GKRR (S3)","Elephants"),
+       col = c("black","firebrick","red"),
+       lty = c(2,1,NA), pch = c(NA,NA,17), lwd = 2, bty = "n")
+```
+
+---
+
+## Session information
+
+```{r session}
+sessionInfo()
+```
+
+## References
