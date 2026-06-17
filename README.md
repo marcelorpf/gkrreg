@@ -137,14 +137,14 @@ Or in BibTeX:
 
 ```bibtex
 @Article{DeCarvalho+LimaNeto+Ferreira:2017,
-  author  = {{De Carvalho}, Francisco de A.T. and {Lima Neto}, Eufrásio de A.
-             and Ferreira, Marcelo R.P.},
-  title   = {A Robust Regression Method Based on Exponential-Type Kernel Functions},
-  journal = {Neurocomputing},
-  year    = {2017},
-  volume  = {234},
-  pages   = {58--74},
-  doi     = {10.1016/j.neucom.2016.12.035},
+  author  = "{De Carvalho}, Francisco de A.T. and {Lima Neto}, Eufrásio de A.
+             and Ferreira, Marcelo R.P.",
+  title   = "A Robust Regression Method Based on Exponential-Type Kernel Functions",
+  journal = "Neurocomputing",
+  year    = "2017",
+  volume  = "234",
+  pages   = "58--74",
+  doi     = "10.1016/j.neucom.2016.12.035",
 }
 
 @Manual{gkrreg:2025,
