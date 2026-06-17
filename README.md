@@ -148,11 +148,11 @@ Or in BibTeX:
 }
 
 @Manual{gkrreg:2025,
-  author = {Ferreira, Marcelo Rodrigo Portela and {Lima Neto}, Eufrásio de Andrade},
-  title  = {{gkrreg}: {Gaussian} Kernel Robust Regression},
-  year   = {2025},
-  note   = {R package version 0.4.0},
-  url    = {https://CRAN.R-project.org/package=gkrreg},
+  author = "Ferreira, Marcelo Rodrigo Portela and {Lima Neto}, Eufrásio de Andrade",
+  title  = "{gkrreg}: {Gaussian} Kernel Robust Regression",
+  year   = "2025",
+  note   = "R package version 0.4.0",
+  url    = "https://CRAN.R-project.org/package=gkrreg",
 }
 ```
 
